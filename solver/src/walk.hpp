@@ -136,7 +136,7 @@ walkWoSt(const PoissonScene<ScalarType, DIM>& scene,
             }
         }
 
-        // Closest Neumann silhouette → ball radius
+        // Closest Neumann silhouette -> ball radius
         Vector<DIM> tmpPos = onNeumann ? pos - epsilon * neumannNormal
                                        : pos; // NOTE: flipNormal seems not work here, so we offset the position inward
         bool silFound = scene.findClosestNeumannSilhouette(
@@ -173,7 +173,7 @@ walkWoSt(const PoissonScene<ScalarType, DIM>& scene,
 
         lastStepDir = dir;
 
-        // Ray-intersect Neumann boundary → walk endpoint
+        // Ray-intersect Neumann -> walk endpoint
         Vector<DIM> origin = onNeumann ? pos - epsilon * neumannNormal : pos;
         double distBoundary = radius;
         Vector<DIM> newPos;
@@ -246,7 +246,6 @@ walkWoP(const PoissonScene<ScalarType, DIM>& scene,
 
     const auto& probesVec = probes.probes();
     Vector<DIM> pos = startPoint;
-    double throughput = 1.0;
     double kappa = scene.isScreened() ? scene.getScreenedKappa() : 0.0;
 
     // WoSt state for fallback steps
@@ -260,7 +259,7 @@ walkWoP(const PoissonScene<ScalarType, DIM>& scene,
 
     for (int step = 0; step < maxSteps; ++step) {
         // Interior point checks
-        if (scene.isInteriorOnly() && !scene.isInsideObject(pos)) {
+        if (scene.isInteriorOnly() && !onNeumann && !scene.isInsideObject(pos)) {
             // Walked outside of interior domain, return NaN
             return;
         }
@@ -287,7 +286,7 @@ walkWoP(const PoissonScene<ScalarType, DIM>& scene,
                 distD = static_cast<double>(interaction.d);
                 if (distD < epsilon) {
                     auto bc = scene.boundaryCondition(interaction, pos, BoundaryType::Dirichlet);
-                    path.dirichlet = throughput * bc.a;
+                    path.dirichlet = bc.a;
                     path.dirichletPos = pos;
                     path.dirichletProbeIdx = (path.count > 0) ? path.probeIndices[path.count - 1] : -1;
                     return;
@@ -329,7 +328,7 @@ walkWoP(const PoissonScene<ScalarType, DIM>& scene,
             auto ySample = sampleGreensBall<DIM>(rng, dist01, offset, radius);
             Vector<DIM> y = probePtr->center + ySample.point;
             double green = greensFunction(offset, ySample.point, radius, kappa);
-            ScalarType S_i = throughput * scene.source(y) * green / ySample.pdf;
+            ScalarType S_i = scene.source(y) * green / ySample.pdf;
 
             // Neumann: 0 (probe interior has no Neumann boundary)
             ScalarType N_i(0.0);
@@ -338,10 +337,10 @@ walkWoP(const PoissonScene<ScalarType, DIM>& scene,
             auto zSample = samplePoissonKernelSphere<DIM>(rng, dist01, offset, radius);
             Vector<DIM> newPos = probePtr->center + zSample.point;
 
-            // Screening throughput
+            double transitionWeight = 1.0;
             if (scene.isScreened()) {
                 double pk = poissonKernel<DIM>(offset, zSample.point, radius, kappa);
-                throughput *= pk / zSample.pdf;
+                transitionWeight = pk / zSample.pdf;
             }
 
             double pdfAngle = zSample.pdf;
@@ -353,7 +352,7 @@ walkWoP(const PoissonScene<ScalarType, DIM>& scene,
                 static_assert(DIM == 2 || DIM == 3, "Unsupported dimension");
             }
             int probeIdx = static_cast<int>(probePtr - probesVec.data());
-            path.recordStep(pos, pdfAngle, S_i, N_i, probeIdx);
+            path.recordStep(pos, pdfAngle, transitionWeight, S_i, N_i, probeIdx);
             lastStepDir = (newPos - pos).normalized();
             pos = newPos;
             onNeumann = false;
@@ -396,7 +395,7 @@ walkWoP(const PoissonScene<ScalarType, DIM>& scene,
                         double green = greensFunctionAtCenter<DIM>(sampleP - pos, radius, kappa);
                         double alpha = onNeumann ? 2.0 : 1.0;
                         auto bc = scene.boundaryCondition(interaction, p1, BoundaryType::Neumann);
-                        N_i = throughput * alpha * bc.b * green / nPdf;
+                        N_i = alpha * bc.b * green / nPdf;
                     }
                 }
             }
@@ -409,7 +408,7 @@ walkWoP(const PoissonScene<ScalarType, DIM>& scene,
             }
             lastStepDir = dir;
 
-            // Ray-intersect Neumann → walk endpoint
+            // Ray-intersect Neumann -> walk endpoint
             Vector<DIM> origin = onNeumann ? pos - epsilon * neumannNormal : pos;
             double distBoundary = radius;
             Vector<DIM> newPos;
@@ -434,12 +433,12 @@ walkWoP(const PoissonScene<ScalarType, DIM>& scene,
                 auto [distSource, sourcePdf] = sampleGreensRadiusAtCenter<DIM>(rng, dist01, radius);
                 if (distSource < distBoundary) {
                     Vector<DIM> samplePos = pos + distSource * dir;
-                    S_i = throughput * scene.source(samplePos) *
+                    S_i = scene.source(samplePos) *
                           greensFunctionAtCenter<DIM>((samplePos - pos).eval(), radius, kappa) / sourcePdf;
                 }
             }
 
-            // Screening throughput
+            double transitionWeight = 1.0;
             if (scene.isScreened()) {
                 Vector<DIM> offset = newPos - pos;
                 double dist = offset.norm();
@@ -451,10 +450,10 @@ walkWoP(const PoissonScene<ScalarType, DIM>& scene,
                     areaTerm = 4.0 * PI * dist * dist;
                 else
                     areaTerm = 1.0;
-                throughput *= pk * areaTerm;
+                transitionWeight = pk * areaTerm;
             }
 
-            path.recordStep(pos, 0.5 * INV_PI, S_i, N_i, -1);
+            path.recordStep(pos, 0.5 * INV_PI, transitionWeight, S_i, N_i, -1);
             pos = newPos;
         }
     }

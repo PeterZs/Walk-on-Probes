@@ -9,6 +9,8 @@
 #include <cstddef>
 #include <nlohmann/json.hpp>
 
+#include <omp.h>
+
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -91,6 +93,9 @@ WoPCachingSolver<ScalarType, DIM>::runIteration(int iter)
                      iter);
 #pragma omp parallel
         {
+            int tid = omp_get_thread_num();
+            auto threadRng = Solver<ScalarType, DIM>::makeRngFromSeed(this->seed_, 100000 + 7919 * iter + tid);
+            std::uniform_real_distribution<double> threadDist01(0.0, 1.0);
             WalkPath<ScalarType, DIM> localPath;
             fcpw::Interaction<static_cast<size_t>(DIM)> interaction;
 
@@ -104,11 +109,10 @@ WoPCachingSolver<ScalarType, DIM>::runIteration(int iter)
                         maxSteps_,
                         epsilon_,
                         rMin_,
-                        this->rng_,
-                        this->dist01_,
+                        threadRng,
+                        threadDist01,
                         interaction);
                 if (localPath.dirichlet.isNaN()) {
-                    --k; // retry this walk
                     continue;
                 }
 
@@ -151,32 +155,39 @@ WoPCachingSolver<ScalarType, DIM>::runIteration(int iter)
 
     // ---- Phase 4: source sampling per probe ----
     spdlog::info("WoPCachingSolver: sampling sources for {} probes (iteration {})...", numProbes, iter);
-#pragma omp parallel for schedule(dynamic)
-    for (int p = 0; p < numProbes; ++p) {
-        auto& probe = probesVec[p];
-        if (probe.targetIndices.empty()) {
-            probe.srcCount++;
-            continue;
-        }
+#pragma omp parallel
+    {
+        int tid = omp_get_thread_num();
+        auto threadRng = Solver<ScalarType, DIM>::makeRngFromSeed(this->seed_, 200000 + 7919 * iter + tid);
+        std::uniform_real_distribution<double> threadDist01(0.0, 1.0);
 
-        double R = probe.radius;
-
-        int M = std::max(static_cast<int>(mu_ * std::pow(R, DIM)), minSourceSamples_);
-
-        for (int j = 0; j < M; ++j) {
-            auto ySample = sampleUniformBall<DIM>(this->rng_, this->dist01_, R);
-            Vector<DIM> Yj = probe.center + ySample.point;
-            ScalarType fVal = scene.source(Yj);
-
-            for (size_t localIdx = 0; localIdx < probe.targetIndices.size(); ++localIdx) {
-                int t = probe.targetIndices[localIdx];
-                Vector<DIM> xRel = targetPoints_[t] - probe.center;
-                double G = greensFunction<DIM>(xRel, ySample.point, R, kappa);
-                probe.srcAccum[localIdx] += G * fVal / (ySample.pdf * M);
+#pragma omp for schedule(dynamic)
+        for (int p = 0; p < numProbes; ++p) {
+            auto& probe = probesVec[p];
+            if (probe.targetIndices.empty()) {
+                probe.srcCount++;
+                continue;
             }
-        }
 
-        probe.srcCount++;
+            double R = probe.radius;
+
+            int M = std::max(static_cast<int>(mu_ * std::pow(R, DIM)), minSourceSamples_);
+
+            for (int j = 0; j < M; ++j) {
+                auto ySample = sampleUniformBall<DIM>(threadRng, threadDist01, R);
+                Vector<DIM> Yj = probe.center + ySample.point;
+                ScalarType fVal = scene.source(Yj);
+
+                for (size_t localIdx = 0; localIdx < probe.targetIndices.size(); ++localIdx) {
+                    int t = probe.targetIndices[localIdx];
+                    Vector<DIM> xRel = targetPoints_[t] - probe.center;
+                    double G = greensFunction<DIM>(xRel, ySample.point, R, kappa);
+                    probe.srcAccum[localIdx] += G * fVal / (ySample.pdf * M);
+                }
+            }
+
+            probe.srcCount++;
+        }
     }
 }
 

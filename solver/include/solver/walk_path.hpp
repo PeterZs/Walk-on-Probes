@@ -16,6 +16,7 @@ struct WalkPath
     std::vector<Vector<DIM>> positions;
     std::vector<ScalarType> sourceContribs;
     std::vector<ScalarType> neumannContribs;
+    std::vector<double> transitionWeights;
     std::vector<double> pdfs;                 // sampling PDF for each step's angle
     std::vector<int> probeIndices;            // -1 = fallback WoSt step
     ScalarType dirichlet = ScalarType::NaN(); // NaN if not hit Dirichlet boundary
@@ -28,6 +29,7 @@ struct WalkPath
         positions.reserve(64);
         sourceContribs.reserve(64);
         neumannContribs.reserve(64);
+        transitionWeights.reserve(64);
         pdfs.reserve(64);
         probeIndices.reserve(64);
     }
@@ -37,6 +39,7 @@ struct WalkPath
         positions.clear();
         sourceContribs.clear();
         neumannContribs.clear();
+        transitionWeights.clear();
         pdfs.clear();
         probeIndices.clear();
         dirichlet = ScalarType::NaN();
@@ -44,10 +47,16 @@ struct WalkPath
         count = 0;
     }
 
-    void recordStep(const Vector<DIM>& pos, double pdf, ScalarType S, ScalarType N, int probeIdx)
+    void recordStep(const Vector<DIM>& pos,
+                    double pdf,
+                    double transitionWeight,
+                    ScalarType S,
+                    ScalarType N,
+                    int probeIdx)
     {
         positions.push_back(pos);
         pdfs.push_back(pdf);
+        transitionWeights.push_back(transitionWeight);
         sourceContribs.push_back(S);
         neumannContribs.push_back(N);
         probeIndices.push_back(probeIdx);
@@ -62,7 +71,7 @@ struct WalkPath
         ScalarType accum = dirichlet;
         estimates[count] = accum;
         for (int j = count - 1; j >= 0; --j) {
-            accum += sourceContribs[j] + neumannContribs[j];
+            accum = transitionWeights[j] * accum + sourceContribs[j] + neumannContribs[j];
             estimates[j] = accum;
         }
         estCount = count + 1;
@@ -72,7 +81,7 @@ struct WalkPath
     {
         ScalarType r = dirichlet;
         for (int j = count - 1; j >= 0; --j)
-            r += sourceContribs[j] + neumannContribs[j];
+            r = transitionWeights[j] * r + sourceContribs[j] + neumannContribs[j];
         return r;
     }
 };
