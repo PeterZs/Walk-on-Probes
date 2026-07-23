@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <random>
 #include <string>
@@ -51,6 +52,7 @@ main(int argc, char* argv[])
 
     // ---- load JSON config if provided ----
     nlohmann::json solverJson;
+    nlohmann::json analyticalSettings;
 
     if (!configPath.empty()) {
         spdlog::info("Loading config from {}", configPath);
@@ -76,6 +78,8 @@ main(int argc, char* argv[])
 
         if (j.contains("solver"))
             solverJson = j["solver"];
+        if (j.contains("analytical_settings"))
+            analyticalSettings = j["analytical_settings"];
     }
 
     // ---- validate required params ----
@@ -97,9 +101,16 @@ main(int argc, char* argv[])
 
     auto run = [&]<int DIM>() -> int {
         std::unique_ptr<WOS::PoissonScene<WOS::Scalar<3>, DIM>> scene;
-        if (analytical)
-            scene = std::make_unique<WOS::AnalyticalScene<WOS::Scalar<3>, DIM>>(scenePath);
-        else
+        if (analytical) {
+            auto analyticalScene = std::make_unique<WOS::AnalyticalScene<WOS::Scalar<3>, DIM>>(scenePath);
+            if (!analyticalSettings.empty())
+                analyticalScene->configure(analyticalSettings);
+            spdlog::info("Analytical terms: boundary={}, source={}, screened_kappa={}",
+                         analyticalScene->getBoundaryStrength(),
+                         analyticalScene->getSourceStrength(),
+                         analyticalScene->isScreened() ? analyticalScene->getScreenedKappa() : 0.0);
+            scene = std::move(analyticalScene);
+        } else
             scene = std::make_unique<WOS::ObjScene<WOS::Scalar<3>, DIM>>(scenePath);
 
         // ---- create solver ----
@@ -151,20 +162,38 @@ main(int argc, char* argv[])
         solver->solve(points, results);
 
         // ---- compute relMSE against reference solution ----
+        double visualizationMin = 0.0;
+        double visualizationMax = 1.0;
         if (analytical) {
             auto* ascene = static_cast<WOS::AnalyticalScene<WOS::Scalar<3>, DIM>*>(scene.get());
             double sumSqErr = 0.0;
             double sumSqExact = 0.0;
+            double exactMin = std::numeric_limits<double>::infinity();
+            double exactMax = -std::numeric_limits<double>::infinity();
             for (std::size_t i = 0; i < results.size(); ++i) {
                 auto exact = ascene->exactSolution(points[i]);
                 for (int c = 0; c < 3; ++c) {
                     double diff = results[i][c] - exact[c];
                     sumSqErr += diff * diff;
                     sumSqExact += exact[c] * exact[c];
+                    exactMin = std::min(exactMin, exact[c]);
+                    exactMax = std::max(exactMax, exact[c]);
                 }
             }
             double relMSE = sumSqExact > 0.0 ? sumSqErr / sumSqExact : 0.0;
             spdlog::info("relMSE: {:.6e}  (MSE={:.6e}, |exact|^2={:.6e})", relMSE, sumSqErr, sumSqExact);
+
+            if (auto range = ascene->getVisualizationRange()) {
+                visualizationMin = range->first;
+                visualizationMax = range->second;
+            } else if (std::isfinite(exactMin) && std::isfinite(exactMax)) {
+                // Zero retains its visual meaning while the exact range prevents
+                // analytical settings from being silently clipped to [0, 1].
+                visualizationMin = std::min(0.0, exactMin);
+                visualizationMax = std::max(0.0, exactMax);
+                if (visualizationMax - visualizationMin < 1e-12)
+                    visualizationMax = visualizationMin + 1.0;
+            }
         } else {
             std::string gtPath = scenePath + "/gt_" + std::to_string(width) + "_" + std::to_string(height) + ".txt";
             std::ifstream gtFile(gtPath);
@@ -193,13 +222,16 @@ main(int argc, char* argv[])
             }
         }
 
-        // ---- clamp to [0, 1] and scale to [0, 255] ----
+        spdlog::info("Visualization range: [{:.6g}, {:.6g}]", visualizationMin, visualizationMax);
+
+        // ---- map the configured/analytical numeric range to [0, 255] ----
         std::vector<unsigned char> imageData(static_cast<std::size_t>(width) * height * 4, 0);
 
         for (std::size_t i = 0; i < results.size(); ++i) {
             std::size_t pixelIdx = pixelIndices[i];
             for (int c = 0; c < 3; ++c) {
-                double v = std::clamp(results[i][c], 0.0, 1.0);
+                double v = (results[i][c] - visualizationMin) / (visualizationMax - visualizationMin);
+                v = std::clamp(v, 0.0, 1.0);
                 imageData[pixelIdx * 4 + c] = static_cast<unsigned char>(v * 255.0);
             }
             imageData[pixelIdx * 4 + 3] = 255;
