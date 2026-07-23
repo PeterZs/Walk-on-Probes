@@ -74,8 +74,12 @@ template<typename ScalarType, int DIM>
 void
 WoPSolver<ScalarType, DIM>::solve(const std::vector<Vector<DIM>>& points, std::vector<ScalarType>& results)
 {
-    ensureProbes(points);
+    {
+        auto prepareTimer = this->timePrepare();
+        ensureProbes(points);
+    }
 
+    auto computeTimer = this->timeCompute();
     const int numPoints = static_cast<int>(points.size());
     results.resize(numPoints);
 

@@ -45,6 +45,7 @@ template<typename ScalarType, int DIM>
 void
 WoSSolver<ScalarType, DIM>::solve(const std::vector<Vector<DIM>>& points, std::vector<ScalarType>& results)
 {
+    auto computeTimer = this->timeCompute();
     const int numPoints = static_cast<int>(points.size());
     results.resize(numPoints);
 

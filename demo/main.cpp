@@ -159,7 +159,13 @@ main(int argc, char* argv[])
         // ---- solve ----
         spdlog::info("Solving {} pixels ...", points.size());
         std::vector<WOS::Scalar<3>> results;
-        solver->solve(points, results);
+        solver->solveTimed(points, results);
+        const auto& timing = solver->timing();
+        spdlog::info("Timing: prepare={:.6f}s, compute={:.6f}s, query={:.6f}s, total={:.6f}s",
+                     timing.prepare,
+                     timing.compute,
+                     timing.query,
+                     timing.total);
 
         // ---- compute relMSE against reference solution ----
         double visualizationMin = 0.0;

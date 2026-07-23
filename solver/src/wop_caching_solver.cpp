@@ -266,6 +266,9 @@ WoPCachingSolver<ScalarType, DIM>::buildCache()
         return;
     }
 
+    {
+        auto prepareTimer = this->timePrepare();
+
     // 1. Build probe set
     probes_.build(scene, targetPoints_, this->seed_, epsilon_, alphaRec_, alphaRec_, wMin_);
 
@@ -286,10 +289,12 @@ WoPCachingSolver<ScalarType, DIM>::buildCache()
         } else {
             static_assert(DIM == 2 || DIM == 3, "Unsupported dimension");
         }
-        probe.srcAccum.assign(probe.targetIndices.size(), ScalarType(0.0));
+            probe.srcAccum.assign(probe.targetIndices.size(), ScalarType(0.0));
+        }
     }
 
     // 3. Run iterations
+    auto computeTimer = this->timeCompute();
     spdlog::info("WoPCachingSolver: running {} iterations...", numIterations_);
     for (int iter = 0; iter < numIterations_; ++iter) {
         runIteration(iter);
@@ -356,6 +361,7 @@ WoPCachingSolver<ScalarType, DIM>::solve(const std::vector<Vector<DIM>>& points,
         buildCache();
     }
 
+    auto queryTimer = this->timeQuery();
     results.resize(points.size());
 
 #pragma omp parallel

@@ -261,6 +261,9 @@ MVCSolver<ScalarType, DIM>::buildCache()
         return;
     }
 
+    {
+        auto prepareTimer = this->timePrepare();
+
     // Initialize running averages
     accumulatedSolutions_.assign(targetPoints_.size(), ScalarType(0.0));
     accumulatedCounts_.assign(targetPoints_.size(), 0);
@@ -269,9 +272,11 @@ MVCSolver<ScalarType, DIM>::buildCache()
     woStSolver_ = std::make_unique<WoStSolver<ScalarType, DIM>>(scene, this->seed_ + 1);
     woStSolver_->setMaxSteps(maxSteps_);
     woStSolver_->setEpsilon(epsilon_);
-    woStSolver_->setRMin(rMin_);
-    woStSolver_->setWalksPerPixel(wostWpp_);
+        woStSolver_->setRMin(rMin_);
+        woStSolver_->setWalksPerPixel(wostWpp_);
+    }
 
+    auto computeTimer = this->timeCompute();
     spdlog::info("MVCSolver: building cache for {} target points over {} rounds, {} cache points/round",
                  targetPoints_.size(),
                  numIterations_,
@@ -376,6 +381,7 @@ MVCSolver<ScalarType, DIM>::solve(const std::vector<Vector<DIM>>& points, std::v
         targetPoints_ = points;
         buildCache();
     }
+    auto queryTimer = this->timeQuery();
     results = accumulatedSolutions_;
 }
 

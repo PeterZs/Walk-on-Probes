@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <random>
 #include <vector>
@@ -15,6 +16,14 @@
 #include <nlohmann/json_fwd.hpp>
 
 WOS_NAMESPACE_OPEN_SCOPE
+
+struct SolverTiming
+{
+    double prepare = 0.0;
+    double compute = 0.0;
+    double query = 0.0;
+    double total = 0.0;
+};
 
 template<typename ScalarType, int DIM>
 class Solver
@@ -47,11 +56,55 @@ class Solver
             results.push_back(solve(p));
     }
 
+    void solveTimed(const std::vector<Vector<DIM>>& points, std::vector<ScalarType>& results)
+    {
+        timing_ = {};
+        auto timer = PhaseTimer(timing_.total);
+        solve(points, results);
+    }
+
+    const SolverTiming& timing() const { return timing_; }
+
     virtual void configure(const nlohmann::json& j) { /* default: no-op */ }
 
     const PoissonScene<ScalarType, DIM>& scene() const { return *scene_; }
 
   protected:
+    class PhaseTimer
+    {
+      public:
+        explicit PhaseTimer(double& seconds)
+          : seconds_(&seconds)
+          , start_(std::chrono::steady_clock::now())
+        {
+        }
+
+        PhaseTimer(const PhaseTimer&) = delete;
+        PhaseTimer& operator=(const PhaseTimer&) = delete;
+
+        PhaseTimer(PhaseTimer&& other) noexcept
+          : seconds_(other.seconds_)
+          , start_(other.start_)
+        {
+            other.seconds_ = nullptr;
+        }
+
+        ~PhaseTimer()
+        {
+            if (!seconds_)
+                return;
+            *seconds_ += std::chrono::duration<double>(std::chrono::steady_clock::now() - start_).count();
+        }
+
+      private:
+        double* seconds_;
+        std::chrono::steady_clock::time_point start_;
+    };
+
+    PhaseTimer timePrepare() { return PhaseTimer(timing_.prepare); }
+    PhaseTimer timeCompute() { return PhaseTimer(timing_.compute); }
+    PhaseTimer timeQuery() { return PhaseTimer(timing_.query); }
+
     static pcg64 makeRngFromSeed(uint64_t seed, int stream)
     {
         uint32_t sd[] = {
@@ -65,6 +118,7 @@ class Solver
     uint64_t seed_;
     pcg64 rng_;
     std::uniform_real_distribution<double> dist01_{ 0.0, 1.0 };
+    SolverTiming timing_;
 };
 
 extern template class Solver<Scalar<1>, 2>;

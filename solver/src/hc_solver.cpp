@@ -9,6 +9,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <omp.h>
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -72,6 +73,14 @@ HCSolver<ScalarType, DIM>::runIteration(int iter)
 
     // ---- Phase 1: batch WoSt solve ----
     if (!allBoundaryPoints_.empty()) {
+        // Use a fresh seed for every iteration. WoSt batch solves initialize
+        // their thread streams from the solver seed, so reusing one solver
+        // would otherwise repeat the same random streams each iteration.
+        woStSolver_ = std::make_unique<WoStSolver<ScalarType, DIM>>(scene, this->seed_ + 1 + iter);
+        woStSolver_->setMaxSteps(maxSteps_);
+        woStSolver_->setEpsilon(epsilon_);
+        woStSolver_->setRMin(rMin_);
+        woStSolver_->setWalksPerPixel(wostWpp_);
         woStSolver_->solve(allBoundaryPoints_, allBoundaryResults_);
 
         // ---- Phase 2: accumulate expansion coefficients (parallel per probe) ----
@@ -92,32 +101,39 @@ HCSolver<ScalarType, DIM>::runIteration(int iter)
 
     // ---- Phase 3: source sampling per probe ----
     spdlog::info("HCSolver: sampling sources for {} probes...", numProbes);
-#pragma omp parallel for schedule(dynamic)
-    for (int p = 0; p < numProbes; ++p) {
-        auto& probe = probesVec[p];
-        if (probe.targetIndices.empty()) {
-            probe.srcCount++;
-            continue;
-        }
+#pragma omp parallel
+    {
+        int tid = omp_get_thread_num();
+        auto threadRng = Solver<ScalarType, DIM>::makeRngFromSeed(this->seed_, 300000 + 7919 * iter + tid);
+        std::uniform_real_distribution<double> threadDist01(0.0, 1.0);
 
-        double R = probe.radius;
-
-        int M = std::max(static_cast<int>(mu_ * std::pow(R, DIM)), minSourceSamples_);
-
-        for (int j = 0; j < M; ++j) {
-            auto ySample = sampleUniformBall<DIM>(this->rng_, this->dist01_, R);
-            Vector<DIM> Yj = probe.center + ySample.point;
-            ScalarType fVal = scene.source(Yj);
-
-            for (size_t localIdx = 0; localIdx < probe.targetIndices.size(); ++localIdx) {
-                int t = probe.targetIndices[localIdx];
-                Vector<DIM> xRel = targetPoints_[t] - probe.center;
-                double G = greensFunction<DIM>(xRel, ySample.point, R, kappa);
-                probe.srcAccum[localIdx] += G * fVal / (ySample.pdf * M);
+#pragma omp for schedule(dynamic)
+        for (int p = 0; p < numProbes; ++p) {
+            auto& probe = probesVec[p];
+            if (probe.targetIndices.empty()) {
+                probe.srcCount++;
+                continue;
             }
-        }
 
-        probe.srcCount++;
+            double R = probe.radius;
+
+            int M = std::max(static_cast<int>(mu_ * std::pow(R, DIM)), minSourceSamples_);
+
+            for (int j = 0; j < M; ++j) {
+                auto ySample = sampleUniformBall<DIM>(threadRng, threadDist01, R);
+                Vector<DIM> Yj = probe.center + ySample.point;
+                ScalarType fVal = scene.source(Yj);
+
+                for (size_t localIdx = 0; localIdx < probe.targetIndices.size(); ++localIdx) {
+                    int t = probe.targetIndices[localIdx];
+                    Vector<DIM> xRel = targetPoints_[t] - probe.center;
+                    double G = greensFunction<DIM>(xRel, ySample.point, R, kappa);
+                    probe.srcAccum[localIdx] += G * fVal / (ySample.pdf * M);
+                }
+            }
+
+            probe.srcCount++;
+        }
     }
 }
 
@@ -196,6 +212,9 @@ HCSolver<ScalarType, DIM>::buildCache()
         return;
     }
 
+    {
+        auto prepareTimer = this->timePrepare();
+
     // 1. Build probe set
     probes_.build(scene, targetPoints_, this->seed_, epsilon_, alphaRec_, alphaRec_, wMin_);
 
@@ -229,14 +248,10 @@ HCSolver<ScalarType, DIM>::buildCache()
         probe.srcAccum.assign(probe.targetIndices.size(), ScalarType(0.0));
     }
 
-    // 3. Create internal WoSt solver
-    woStSolver_ = std::make_unique<WoStSolver<ScalarType, DIM>>(scene, this->seed_ + 1);
-    woStSolver_->setMaxSteps(maxSteps_);
-    woStSolver_->setEpsilon(epsilon_);
-    woStSolver_->setRMin(rMin_);
-    woStSolver_->setWalksPerPixel(wostWpp_);
+    }
 
     // 4. Run iterations
+    auto computeTimer = this->timeCompute();
     spdlog::info("HCSolver: running {} iterations...", numIterations_);
     for (int iter = 0; iter < numIterations_; ++iter) {
         runIteration(iter);
@@ -303,6 +318,7 @@ HCSolver<ScalarType, DIM>::solve(const std::vector<Vector<DIM>>& points, std::ve
         buildCache();
     }
 
+    auto queryTimer = this->timeQuery();
     results.resize(points.size());
 
 #pragma omp parallel

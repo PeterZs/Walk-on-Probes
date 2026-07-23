@@ -8,7 +8,7 @@
     "analytical": false,
     "solver": {
         "type": "hc",
-        "num_iterations": 4,
+        "num_iterations": 1,
         "fourier_modes": 10,
         "lambda": 100.0,
         "mu": 1000.0,
