@@ -241,6 +241,7 @@ walkWoP(const PoissonScene<ScalarType, DIM>& scene,
         int maxSteps,
         double epsilon,
         double rMin,
+        double alphaWalk,
         bool enableSource,
         pcg64& rng,
         std::uniform_real_distribution<double>& dist01,
@@ -259,7 +260,6 @@ walkWoP(const PoissonScene<ScalarType, DIM>& scene,
     Vector<DIM> neumannNormal;
     Vector<DIM> lastStepDir = Vector<DIM>::Zero();
 
-    constexpr double alphaWalk = 0.7;
     constexpr double p_fb = 0.0;
 
     for (int step = 0; step < maxSteps; ++step) {

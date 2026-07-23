@@ -109,6 +109,7 @@ WoPCachingSolver<ScalarType, DIM>::runIteration(int iter)
                         maxSteps_,
                         epsilon_,
                         rMin_,
+                        alphaWalk_,
                         this->enableSource_,
                         random.rng,
                         random.uniform,
