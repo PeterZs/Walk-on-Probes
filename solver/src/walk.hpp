@@ -103,7 +103,7 @@ walkWoSt(const PoissonScene<ScalarType, DIM>& scene,
 
     for (int step = 0; step < maxSteps; ++step) {
         // Interior point checks
-        if (scene.isInteriorOnly() && !scene.isInsideObject(pos)) {
+        if (scene.isInteriorOnly() && !onNeumann && !scene.isInsideObject(pos)) {
             // Walked outside of interior domain, return NaN
             return ScalarType::NaN();
         }
