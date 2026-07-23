@@ -19,6 +19,7 @@
 #include <limits>
 #include <memory>
 #include <random>
+#include <sstream>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -205,24 +206,67 @@ main(int argc, char* argv[])
             std::string gtPath = scenePath + "/gt_" + std::to_string(width) + "_" + std::to_string(height) + ".txt";
             std::ifstream gtFile(gtPath);
             if (gtFile.is_open()) {
-                std::string comment;
-                std::getline(gtFile, comment);
-                int gtW, gtH, gtN;
-                gtFile >> gtW >> gtH >> gtN;
-                if (gtN == static_cast<int>(results.size())) {
+                int gtW = 0;
+                int gtH = 0;
+                int gtN = 0;
+                bool headerFound = false;
+                std::string line;
+                while (std::getline(gtFile, line)) {
+                    const auto first = line.find_first_not_of(" \t\r\n");
+                    if (first == std::string::npos || line[first] == '#')
+                        continue;
+
+                    std::istringstream header(line);
+                    std::string trailing;
+                    if ((header >> gtW >> gtH >> gtN) && !(header >> trailing))
+                        headerFound = true;
+                    break;
+                }
+
+                std::vector<double> gtValues;
+                double value = 0.0;
+                while (gtFile >> value)
+                    gtValues.push_back(value);
+
+                if (!headerFound) {
+                    spdlog::error("Invalid GT header in {}", gtPath);
+                } else if (gtW != width || gtH != height) {
+                    spdlog::error(
+                      "GT resolution mismatch in {}: file={}x{}, expected={}x{}", gtPath, gtW, gtH, width, height);
+                } else if (gtN != static_cast<int>(results.size())) {
+                    spdlog::error(
+                      "GT sample count mismatch in {}: file={}, expected={}", gtPath, gtN, results.size());
+                } else if (gtValues.size() != results.size() && gtValues.size() != 3 * results.size()) {
+                    spdlog::error("GT value count mismatch in {}: got {}, expected {} (scalar) or {} (RGB)",
+                                  gtPath,
+                                  gtValues.size(),
+                                  results.size(),
+                                  3 * results.size());
+                } else {
+                    const bool isRgb = gtValues.size() == 3 * results.size();
                     double sumSqErr = 0.0;
                     double sumSqGt = 0.0;
                     for (std::size_t i = 0; i < results.size(); ++i) {
-                        double r, g, b;
-                        gtFile >> r >> g >> b;
-                        double diffR = results[i][0] - r;
-                        double diffG = results[i][1] - g;
-                        double diffB = results[i][2] - b;
-                        sumSqErr += diffR * diffR + diffG * diffG + diffB * diffB;
-                        sumSqGt += r * r + g * g + b * b;
+                        if (isRgb) {
+                            for (int c = 0; c < 3; ++c) {
+                                double gt = gtValues[3 * i + c];
+                                double diff = results[i][c] - gt;
+                                sumSqErr += diff * diff;
+                                sumSqGt += gt * gt;
+                            }
+                        } else {
+                            double gt = gtValues[i];
+                            double diff = results[i][0] - gt;
+                            sumSqErr += diff * diff;
+                            sumSqGt += gt * gt;
+                        }
                     }
                     double relMSE = sumSqGt > 0.0 ? sumSqErr / sumSqGt : 0.0;
-                    spdlog::info("relMSE(gt): {:.6e}  (MSE={:.6e}, |gt|^2={:.6e})", relMSE, sumSqErr, sumSqGt);
+                    spdlog::info("relMSE(gt, {}): {:.6e}  (MSE={:.6e}, |gt|^2={:.6e})",
+                                 isRgb ? "RGB" : "scalar",
+                                 relMSE,
+                                 sumSqErr,
+                                 sumSqGt);
                 }
             } else {
                 spdlog::info("No GT file found at {}, skipping relMSE computation against GT", gtPath);
