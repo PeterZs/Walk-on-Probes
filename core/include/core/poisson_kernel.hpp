@@ -1,9 +1,12 @@
 #pragma once
 
+#include "core/bessel_utils.hpp"
 #include "core/math_defs.hpp"
 #include "core/vector.hpp"
 
 WOS_NAMESPACE_OPEN_SCOPE
+
+inline constexpr bool UseApproximateScreenedPoissonKernel = false;
 
 // TODO: Poisson kernel for screened Poisson equation (Δ - κ²)u = f in ball B(0,R)
 
@@ -67,7 +70,7 @@ poissonKernelAtCenterOffBoundary(const Vector<DIM>& z, double R, double kappa = 
 
 template<int DIM>
 [[nodiscard]] double
-poissonKernelOffCenter(const Vector<DIM>& x, const Vector<DIM>& z, double R, double kappa = 0.0) noexcept
+poissonKernelOffCenterExact(const Vector<DIM>& x, const Vector<DIM>& z, double R, double kappa = 0.0) noexcept
 {
     if constexpr (DIM == 2) {
         if (std::abs(kappa) < EPSILON) {
@@ -81,15 +84,17 @@ poissonKernelOffCenter(const Vector<DIM>& x, const Vector<DIM>& z, double R, dou
             double kr = kappa * r;
 
             double sum = 0.0;
-            double bessel_term = 0.0;
             double cos_term = 0.0;
             int n = 0;
             constexpr int max_iter = 200;
             for (n = 0; n < max_iter; ++n) {
-                bessel_term = (n == 0 ? 1.0 : 2.0) * std::cyl_bessel_i(n, kr) / (std::cyl_bessel_i(n, kR) * R);
+                double besselRatio = safeBesselIRatio(static_cast<double>(n), kr, kR);
                 cos_term = std::cos(n * theta);
-                sum += bessel_term * cos_term;
-                if (bessel_term < EPSILON) {
+                double term = (n == 0 ? 1.0 : 2.0) * besselRatio * cos_term / R;
+                if (!std::isfinite(term))
+                    return std::numeric_limits<double>::quiet_NaN();
+                sum += term;
+                if (n > 5 && std::abs(term) < EPSILON * std::max(1.0, std::abs(sum))) {
                     break;
                 }
             }
@@ -107,7 +112,6 @@ poissonKernelOffCenter(const Vector<DIM>& x, const Vector<DIM>& z, double R, dou
             double kr = kappa * r;
 
             double sum = 0.0;
-            double bessel_term = 0.0;
             // Legendre recurrence: P_0=1, P_1=x, P_{n}=((2n-1)*x*P_{n-1}-(n-1)*P_{n-2})/n
             double P_nm2 = 1.0;
             double P_nm1 = 1.0;
@@ -123,10 +127,12 @@ poissonKernelOffCenter(const Vector<DIM>& x, const Vector<DIM>& z, double R, dou
                     P_n = ((2.0 * n - 1.0) * cos_theta * P_nm1 - (n - 1.0) * P_nm2) / n;
                 }
 
-                bessel_term = (2.0 * n + 1.0) * std::cyl_bessel_i(n + 0.5, kr) /
-                              (std::cyl_bessel_i(n + 0.5, kR) * R * std::sqrt(R * r));
-                sum += bessel_term * P_n;
-                if (bessel_term < EPSILON) {
+                double besselRatio = safeBesselIRatio(n + 0.5, kr, kR);
+                double term = (2.0 * n + 1.0) * besselRatio * P_n / (R * std::sqrt(R * r));
+                if (!std::isfinite(term))
+                    return std::numeric_limits<double>::quiet_NaN();
+                sum += term;
+                if (n > 5 && std::abs(term) < EPSILON * std::max(1.0, std::abs(sum))) {
                     break;
                 }
 
@@ -138,6 +144,70 @@ poissonKernelOffCenter(const Vector<DIM>& x, const Vector<DIM>& z, double R, dou
     } else {
         static_assert(DIM == 2 || DIM == 3, "Unsupported dimension");
         return 0.0;
+    }
+}
+
+template<int DIM>
+[[nodiscard]] double
+poissonKernelOffCenterApprox(const Vector<DIM>& x, const Vector<DIM>& z,
+                             double R, double kappa = 0.0) noexcept
+{
+    if (std::abs(kappa) < EPSILON) {
+        return poissonKernelOffCenterExact<DIM>(x, z, R, kappa);
+    }
+
+    const double minLength = EPSILON * std::max(R, EPSILON);
+    const Vector<DIM> displacement = z - x;
+    const double displacementNorm = std::max(displacement.norm(), minLength);
+    const double boundaryNorm = std::max(z.norm(), minLength);
+    const double dot = x.dot(z);
+    const double mirrorRadius = std::max((R * R - dot) / R, minLength);
+    const double positiveKappa = std::abs(kappa);
+
+    auto radialDerivativeMagnitude = [&](double radius) {
+        const double kr = positiveKappa * radius;
+        const double kR = positiveKappa * R;
+        if constexpr (DIM == 2) {
+            return positiveKappa *
+                   (std::cyl_bessel_k(1.0, kr) +
+                    std::cyl_bessel_k(0.0, kR) * std::cyl_bessel_i(1.0, kr) /
+                        std::cyl_bessel_i(0.0, kR));
+        } else {
+            return positiveKappa / radius *
+                   (std::exp(-kr) * (1.0 + 1.0 / kr) +
+                    std::exp(-kR) / std::sinh(kR) *
+                        (std::cosh(kr) - std::sinh(kr) / kr));
+        }
+    };
+
+    const double term1 =
+        radialDerivativeMagnitude(displacementNorm) *
+        (z.squaredNorm() - dot) / (displacementNorm * boundaryNorm);
+    const double term2 =
+        radialDerivativeMagnitude(mirrorRadius) * dot / (R * boundaryNorm);
+
+    if constexpr (DIM == 2) {
+        return 0.5 * INV_PI * (term1 + term2);
+    } else if constexpr (DIM == 3) {
+        return 0.25 * INV_PI * (term1 + term2);
+    } else {
+        static_assert(DIM == 2 || DIM == 3, "Unsupported dimension");
+        return 0.0;
+    }
+}
+
+template<int DIM>
+[[nodiscard]] double
+poissonKernelOffCenter(const Vector<DIM>& x, const Vector<DIM>& z,
+                       double R, double kappa = 0.0) noexcept
+{
+    if (std::abs(kappa) < EPSILON) {
+        return poissonKernelOffCenterExact<DIM>(x, z, R, kappa);
+    }
+    if constexpr (UseApproximateScreenedPoissonKernel) {
+        return poissonKernelOffCenterApprox<DIM>(x, z, R, kappa);
+    } else {
+        return poissonKernelOffCenterExact<DIM>(x, z, R, kappa);
     }
 }
 

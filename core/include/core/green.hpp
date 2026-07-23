@@ -1,11 +1,14 @@
 #pragma once
 
+#include "core/bessel_utils.hpp"
 #include "core/math_defs.hpp"
 #include "core/vector.hpp"
 #include <cassert>
 #include <cmath>
 
 WOS_NAMESPACE_OPEN_SCOPE
+
+inline constexpr bool UseApproximateScreenedGreen = true;
 
 // TODO: Green's function for screened Poisson equation (Δ - κ²)G = δ in ball B(0,R)
 
@@ -41,7 +44,7 @@ greensFunctionAtCenter(const Vector<DIM>& y, double R, double kappa = 0.0) noexc
 
 template<int DIM>
 [[nodiscard]] double
-greensFunctionOffCenter(const Vector<DIM>& x, const Vector<DIM>& y, double R, double kappa = 0.0) noexcept
+greensFunctionOffCenterExact(const Vector<DIM>& x, const Vector<DIM>& y, double R, double kappa = 0.0) noexcept
 {
     // TODO
     if constexpr (DIM == 2) {
@@ -61,17 +64,20 @@ greensFunctionOffCenter(const Vector<DIM>& x, const Vector<DIM>& y, double R, do
             double kR = kappa * R;
 
             double sum = 0.0;
-            double bessel_term = 0.0;
             double cos_term = 0.0;
             int n = 0;
             constexpr int max_iter = 1000;
             for (n = 0; n < max_iter; ++n) {
-                bessel_term = (n == 0 ? 1.0 : 2.0) * std::cyl_bessel_i(n, kr_minus) *
-                              (std::cyl_bessel_k(n, kr_plus) -
-                               std::cyl_bessel_k(n, kR) * std::cyl_bessel_i(n, kr_plus) / std::cyl_bessel_i(n, kR));
+                double order = static_cast<double>(n);
+                double ikProduct = safeBesselIKProduct(order, kr_minus, kr_plus);
+                double boundaryRatio =
+                  safeBesselKRatio(order, kR, kr_plus) * safeBesselIRatio(order, kr_plus, kR);
                 cos_term = std::cos(n * theta);
-                sum += bessel_term * cos_term;
-                if (bessel_term < EPSILON) {
+                double term = (n == 0 ? 1.0 : 2.0) * ikProduct * (1.0 - boundaryRatio) * cos_term;
+                if (!std::isfinite(term))
+                    return std::numeric_limits<double>::quiet_NaN();
+                sum += term;
+                if (n > 5 && std::abs(term) < EPSILON * std::max(1.0, std::abs(sum))) {
                     break;
                 }
             }
@@ -94,7 +100,6 @@ greensFunctionOffCenter(const Vector<DIM>& x, const Vector<DIM>& y, double R, do
             double kR = kappa * R;
 
             double sum = 0.0;
-            double bessel_term = 0.0;
             // Legendre recurrence: P_0=1, P_1=x, P_{n}=((2n-1)*x*P_{n-1}-(n-1)*P_{n-2})/n
             double P_nm2 = 1.0;
             double P_nm1 = 1.0;
@@ -110,13 +115,16 @@ greensFunctionOffCenter(const Vector<DIM>& x, const Vector<DIM>& y, double R, do
                     P_n = ((2.0 * n - 1.0) * cos_theta * P_nm1 - (n - 1.0) * P_nm2) / n;
                 }
 
-                bessel_term = (2.0 * n + 1.0) * std::cyl_bessel_i(n + 0.5, kr_minus) *
-                              (std::cyl_bessel_k(n + 0.5, kr_plus) - std::cyl_bessel_k(n + 0.5, kR) *
-                                                                       std::cyl_bessel_i(n + 0.5, kr_plus) /
-                                                                       std::cyl_bessel_i(n + 0.5, kR)) /
-                              std::sqrt(r_minus * r_plus);
-                sum += bessel_term * P_n;
-                if (bessel_term < EPSILON) {
+                double order = n + 0.5;
+                double ikProduct = safeBesselIKProduct(order, kr_minus, kr_plus);
+                double boundaryRatio =
+                  safeBesselKRatio(order, kR, kr_plus) * safeBesselIRatio(order, kr_plus, kR);
+                double term =
+                  (2.0 * n + 1.0) * ikProduct * (1.0 - boundaryRatio) * P_n / std::sqrt(r_minus * r_plus);
+                if (!std::isfinite(term))
+                    return std::numeric_limits<double>::quiet_NaN();
+                sum += term;
+                if (n > 5 && std::abs(term) < EPSILON * std::max(1.0, std::abs(sum))) {
                     break;
                 }
 
@@ -128,6 +136,37 @@ greensFunctionOffCenter(const Vector<DIM>& x, const Vector<DIM>& y, double R, do
     } else {
         static_assert(DIM == 2 || DIM == 3, "Unsupported dimension");
         return 0.0;
+    }
+}
+
+template<int DIM>
+[[nodiscard]] double
+greensFunctionOffCenterApprox(const Vector<DIM>& x, const Vector<DIM>& y,
+                              double R, double kappa = 0.0) noexcept
+{
+    if (std::abs(kappa) < EPSILON) {
+        return greensFunctionOffCenterExact<DIM>(x, y, R, kappa);
+    }
+
+    Vector<DIM> displacement = y - x;
+    Vector<DIM> mirror = Vector<DIM>::Zero();
+    mirror[0] = (R * R - x.dot(y)) / R;
+    return greensFunctionAtCenter<DIM>(displacement, R, kappa) -
+           greensFunctionAtCenter<DIM>(mirror, R, kappa);
+}
+
+template<int DIM>
+[[nodiscard]] double
+greensFunctionOffCenter(const Vector<DIM>& x, const Vector<DIM>& y,
+                        double R, double kappa = 0.0) noexcept
+{
+    if (std::abs(kappa) < EPSILON) {
+        return greensFunctionOffCenterExact<DIM>(x, y, R, kappa);
+    }
+    if constexpr (UseApproximateScreenedGreen) {
+        return greensFunctionOffCenterApprox<DIM>(x, y, R, kappa);
+    } else {
+        return greensFunctionOffCenterExact<DIM>(x, y, R, kappa);
     }
 }
 

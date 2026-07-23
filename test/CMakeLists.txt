@@ -9,3 +9,7 @@ add_test(NAME scalar COMMAND test_scalar)
 add_executable(test_probe test_probe.cpp)
 target_link_libraries(test_probe PRIVATE solver gtest_main)
 add_test(NAME sh_probe COMMAND test_probe)
+
+add_executable(test_bessel test_bessel.cpp)
+target_link_libraries(test_bessel PRIVATE core gtest_main)
+add_test(NAME bessel COMMAND test_bessel)
