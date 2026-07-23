@@ -56,6 +56,8 @@ class Solver
     const SolverTiming& timing() const { return timing_; }
 
     virtual void configure(const nlohmann::json& j) { /* default: no-op */ }
+    void setEnableSource(bool enable) { enableSource_ = enable; }
+    bool enableSource() const { return enableSource_; }
 
     const PoissonScene<ScalarType, DIM>& scene() const { return *scene_; }
 
@@ -101,6 +103,7 @@ class Solver
     const PoissonScene<ScalarType, DIM>* scene_;
     uint64_t seed_;
     ThreadRngPool* rngPool_;
+    bool enableSource_ = true;
     SolverTiming timing_;
 };
 

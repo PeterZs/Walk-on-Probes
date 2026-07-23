@@ -55,6 +55,8 @@ HCSolver<ScalarType, DIM>::configure(const nlohmann::json& j)
         setUseSN(j["use_sn"].get<bool>());
     if (j.contains("use_cv"))
         setUseCV(j["use_cv"].get<bool>());
+    if (j.contains("enable_source"))
+        this->setEnableSource(j["enable_source"].get<bool>());
 }
 
 // ==== runIteration ====
@@ -81,6 +83,7 @@ HCSolver<ScalarType, DIM>::runIteration(int iter)
         woStSolver_->setEpsilon(epsilon_);
         woStSolver_->setRMin(rMin_);
         woStSolver_->setWalksPerPixel(wostWpp_);
+        woStSolver_->setEnableSource(this->enableSource_);
         woStSolver_->solve(allBoundaryPoints_, allBoundaryResults_);
 
         // ---- Phase 2: accumulate expansion coefficients (parallel per probe) ----
@@ -100,6 +103,9 @@ HCSolver<ScalarType, DIM>::runIteration(int iter)
     }
 
     // ---- Phase 3: source sampling per probe ----
+    if (!this->enableSource_)
+        return;
+
     spdlog::info("HCSolver: sampling sources for {} probes...", numProbes);
 #pragma omp parallel
     {
@@ -285,7 +291,8 @@ HCSolver<ScalarType, DIM>::solvePoint(const Vector<DIM>& p,
         // Fallback: averaged WoSt
         ScalarType sum(0.0);
         for (int w = 0; w < wostWpp_; ++w) {
-            auto walkResult = walkWoSt(scene, p, maxSteps_, epsilon_, rMin_, rng, dist, interaction);
+            auto walkResult =
+              walkWoSt(scene, p, maxSteps_, epsilon_, rMin_, this->enableSource_, rng, dist, interaction);
             if (walkResult.isNaN()) {
                 --w; // retry this walk
                 continue;

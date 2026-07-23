@@ -29,6 +29,7 @@ walkWoS(const PoissonScene<ScalarType, DIM>& scene,
         const Vector<DIM>& startPoint,
         int maxSteps,
         double epsilon,
+        bool enableSource,
         pcg64& rng,
         std::uniform_real_distribution<double>& dist01,
         fcpw::Interaction<static_cast<size_t>(DIM)>& interaction)
@@ -57,9 +58,11 @@ walkWoS(const PoissonScene<ScalarType, DIM>& scene,
         }
 
         // Source term: importance-sample from G(pos,·) in B(pos, dist)
-        Sample<DIM> offsetSample = sampleGreensBallAtCenter<DIM>(rng, dist01, radius);
-        result += screeningThroughput * scene.source(pos + offsetSample.point) *
-                  greensFunctionAtCenter(offsetSample.point, radius, kappa) / offsetSample.pdf;
+        if (enableSource) {
+            Sample<DIM> offsetSample = sampleGreensBallAtCenter<DIM>(rng, dist01, radius);
+            result += screeningThroughput * scene.source(pos + offsetSample.point) *
+                      greensFunctionAtCenter(offsetSample.point, radius, kappa) / offsetSample.pdf;
+        }
 
         // Walk to random point on sphere surface
         Sample<DIM> sphereSample = samplePoissonKernelSphereAtCenter<DIM>(rng, dist01, radius);
@@ -83,6 +86,7 @@ walkWoSt(const PoissonScene<ScalarType, DIM>& scene,
          int maxSteps,
          double epsilon,
          double rMin,
+         bool enableSource,
          pcg64& rng,
          std::uniform_real_distribution<double>& dist01,
          fcpw::Interaction<static_cast<size_t>(DIM)>& interaction)
@@ -192,7 +196,7 @@ walkWoSt(const PoissonScene<ScalarType, DIM>& scene,
         }
 
         // Source term: importance-sample along the ray direction
-        {
+        if (enableSource) {
             auto [distSource, sourcePdf] = sampleGreensRadiusAtCenter<DIM>(rng, dist01, radius);
             if (distSource < distBoundary) {
                 Vector<DIM> samplePos = pos + distSource * dir;
@@ -237,6 +241,7 @@ walkWoP(const PoissonScene<ScalarType, DIM>& scene,
         int maxSteps,
         double epsilon,
         double rMin,
+        bool enableSource,
         pcg64& rng,
         std::uniform_real_distribution<double>& dist01,
         fcpw::Interaction<static_cast<size_t>(DIM)>& interaction)
@@ -325,10 +330,13 @@ walkWoP(const PoissonScene<ScalarType, DIM>& scene,
             Vector<DIM> offset = pos - probePtr->center;
 
             // Source term
-            auto ySample = sampleGreensBall<DIM>(rng, dist01, offset, radius);
-            Vector<DIM> y = probePtr->center + ySample.point;
-            double green = greensFunction(offset, ySample.point, radius, kappa);
-            ScalarType S_i = scene.source(y) * green / ySample.pdf;
+            ScalarType S_i(0.0);
+            if (enableSource) {
+                auto ySample = sampleGreensBall<DIM>(rng, dist01, offset, radius);
+                Vector<DIM> y = probePtr->center + ySample.point;
+                double green = greensFunction(offset, ySample.point, radius, kappa);
+                S_i = scene.source(y) * green / ySample.pdf;
+            }
 
             // Neumann: 0 (probe interior has no Neumann boundary)
             ScalarType N_i(0.0);
@@ -429,7 +437,7 @@ walkWoP(const PoissonScene<ScalarType, DIM>& scene,
 
             // Source term along ray direction
             ScalarType S_i(0.0);
-            {
+            if (enableSource) {
                 auto [distSource, sourcePdf] = sampleGreensRadiusAtCenter<DIM>(rng, dist01, radius);
                 if (distSource < distBoundary) {
                     Vector<DIM> samplePos = pos + distSource * dir;

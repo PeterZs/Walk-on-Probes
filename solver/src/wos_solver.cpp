@@ -21,6 +21,8 @@ WoSSolver<ScalarType, DIM>::configure(const nlohmann::json& j)
         setMaxSteps(j["max_steps"].get<int>());
     if (j.contains("epsilon"))
         setEpsilon(j["epsilon"].get<double>());
+    if (j.contains("enable_source"))
+        this->setEnableSource(j["enable_source"].get<bool>());
 }
 
 template<typename ScalarType, int DIM>
@@ -32,7 +34,7 @@ WoSSolver<ScalarType, DIM>::solve(const Vector<DIM>& targetPoint)
     fcpw::Interaction<DIM> interaction;
     for (int w = 0; w < wpp_; ++w) {
         auto walkResult =
-          walkWoS(*this->scene_, targetPoint, maxSteps_, epsilon_, random.rng, random.uniform, interaction);
+          walkWoS(*this->scene_, targetPoint, maxSteps_, epsilon_, this->enableSource_, random.rng, random.uniform, interaction);
         if (walkResult.isNaN()) {
             --w;
             continue;
@@ -66,7 +68,7 @@ WoSSolver<ScalarType, DIM>::solve(const std::vector<Vector<DIM>>& points, std::v
             fcpw::Interaction<DIM> interaction;
             for (int w = 0; w < wpp_; ++w) {
                 auto walkResult =
-                  walkWoS(*this->scene_, points[i], maxSteps_, epsilon_, random.rng, random.uniform, interaction);
+                  walkWoS(*this->scene_, points[i], maxSteps_, epsilon_, this->enableSource_, random.rng, random.uniform, interaction);
                 if (walkResult.isNaN()) {
                     --w;
                     continue;

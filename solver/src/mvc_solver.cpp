@@ -43,6 +43,7 @@ queryOnePoint(const PoissonScene<ScalarType, DIM>& scene,
               double rMin,
               int minSourceSamples,
               double sourceRatio,
+              bool enableSource,
               pcg64& rng,
               std::uniform_real_distribution<double>& dist01,
               fcpw::Interaction<static_cast<size_t>(DIM)>& interaction,
@@ -81,7 +82,7 @@ queryOnePoint(const PoissonScene<ScalarType, DIM>& scene,
     if (results.empty()) {
         ScalarType sum(0.0);
         for (int w = 0; w < wostWpp; ++w) {
-            auto walkResult = walkWoSt(scene, p, maxSteps, epsilon, rMin, rng, dist01, interaction);
+            auto walkResult = walkWoSt(scene, p, maxSteps, epsilon, rMin, enableSource, rng, dist01, interaction);
             if (walkResult.isNaN()) {
                 --w;
                 continue;
@@ -120,7 +121,7 @@ queryOnePoint(const PoissonScene<ScalarType, DIM>& scene,
     if (boundaryPart.isNaN()) {
         ScalarType sum(0.0);
         for (int w = 0; w < wostWpp; ++w) {
-            auto walkResult = walkWoSt(scene, p, maxSteps, epsilon, rMin, rng, dist01, interaction);
+            auto walkResult = walkWoSt(scene, p, maxSteps, epsilon, rMin, enableSource, rng, dist01, interaction);
             if (walkResult.isNaN()) {
                 --w;
                 continue;
@@ -129,6 +130,9 @@ queryOnePoint(const PoissonScene<ScalarType, DIM>& scene,
         }
         return sum / static_cast<double>(wostWpp);
     }
+
+    if (!enableSource)
+        return boundaryPart;
 
     // Source term MC integration
     int M = std::max(minSourceSamples, static_cast<int>(static_cast<double>(results.size()) * sourceRatio));
@@ -175,6 +179,8 @@ MVCSolver<ScalarType, DIM>::configure(const nlohmann::json& j)
         setRMin(j["r_min"].get<double>());
     if (j.contains("source_ratio"))
         setSourceRatio(j["source_ratio"].get<double>());
+    if (j.contains("enable_source"))
+        this->setEnableSource(j["enable_source"].get<bool>());
     if (j.contains("min_source_samples"))
         setMinSourceSamples(j["min_source_samples"].get<int>());
     if (j.contains("mu"))
@@ -273,8 +279,9 @@ MVCSolver<ScalarType, DIM>::buildCache()
     woStSolver_ = std::make_unique<WoStSolver<ScalarType, DIM>>(scene, this->rngPool());
     woStSolver_->setMaxSteps(maxSteps_);
     woStSolver_->setEpsilon(epsilon_);
-        woStSolver_->setRMin(rMin_);
-        woStSolver_->setWalksPerPixel(wostWpp_);
+    woStSolver_->setRMin(rMin_);
+    woStSolver_->setWalksPerPixel(wostWpp_);
+    woStSolver_->setEnableSource(this->enableSource_);
     }
 
     auto computeTimer = this->timeCompute();
@@ -326,6 +333,7 @@ MVCSolver<ScalarType, DIM>::buildCache()
                                                                    rMin_,
                                                                    minSourceSamples_,
                                                                    sourceRatio_,
+                                                                   this->enableSource_,
                                                                    random.rng,
                                                                    random.uniform,
                                                                    interaction,

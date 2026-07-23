@@ -58,6 +58,8 @@ WoPCachingSolver<ScalarType, DIM>::configure(const nlohmann::json& j)
         setUseSN(j["use_sn"].get<bool>());
     if (j.contains("use_cv"))
         setUseCV(j["use_cv"].get<bool>());
+    if (j.contains("enable_source"))
+        this->setEnableSource(j["enable_source"].get<bool>());
 }
 
 // ==== runIteration ====
@@ -107,6 +109,7 @@ WoPCachingSolver<ScalarType, DIM>::runIteration(int iter)
                         maxSteps_,
                         epsilon_,
                         rMin_,
+                        this->enableSource_,
                         random.rng,
                         random.uniform,
                         interaction);
@@ -152,6 +155,9 @@ WoPCachingSolver<ScalarType, DIM>::runIteration(int iter)
     }
 
     // ---- Phase 4: source sampling per probe ----
+    if (!this->enableSource_)
+        return;
+
     spdlog::info("WoPCachingSolver: sampling sources for {} probes (iteration {})...", numProbes, iter);
 #pragma omp parallel
     {
@@ -326,7 +332,8 @@ WoPCachingSolver<ScalarType, DIM>::solvePoint(const Vector<DIM>& p,
         // Fallback: averaged WoSt
         ScalarType sum(0.0);
         for (int w = 0; w < wostWpp_; ++w) {
-            auto walkResult = walkWoSt(scene, p, maxSteps_, epsilon_, rMin_, rng, dist, interaction);
+            auto walkResult =
+              walkWoSt(scene, p, maxSteps_, epsilon_, rMin_, this->enableSource_, rng, dist, interaction);
             if (walkResult.isNaN()) {
                 --w; // retry this walk
                 continue;

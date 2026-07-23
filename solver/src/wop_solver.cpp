@@ -26,6 +26,8 @@ WoPSolver<ScalarType, DIM>::configure(const nlohmann::json& j)
         setAlphaWalk(j["alpha_walk"].get<double>());
     if (j.contains("w_min"))
         setWMin(j["w_min"].get<double>());
+    if (j.contains("enable_source"))
+        this->setEnableSource(j["enable_source"].get<bool>());
 }
 
 template<typename ScalarType, int DIM>
@@ -58,6 +60,7 @@ WoPSolver<ScalarType, DIM>::solve(const Vector<DIM>& targetPoint)
                 maxSteps_,
                 epsilon_,
                 rMin_,
+                this->enableSource_,
                 random.rng,
                 random.uniform,
                 interaction);
@@ -108,6 +111,7 @@ WoPSolver<ScalarType, DIM>::solve(const std::vector<Vector<DIM>>& points, std::v
                         maxSteps_,
                         epsilon_,
                         rMin_,
+                        this->enableSource_,
                         random.rng,
                         random.uniform,
                         interaction);
