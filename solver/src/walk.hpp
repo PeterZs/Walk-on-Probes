@@ -293,7 +293,6 @@ walkWoP(const PoissonScene<ScalarType, DIM>& scene,
                     auto bc = scene.boundaryCondition(interaction, pos, BoundaryType::Dirichlet);
                     path.dirichlet = bc.a;
                     path.dirichletPos = pos;
-                    path.dirichletProbeIdx = (path.count > 0) ? path.probeIndices[path.count - 1] : -1;
                     return;
                 }
             }

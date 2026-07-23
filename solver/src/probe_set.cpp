@@ -221,18 +221,20 @@ ProbeSet<ScalarType, DIM>::evaluate(const Vector<DIM>& p, int pointIdx, double k
         if (w <= 0.0)
             continue;
 
-        result += w * probe->evaluate(p, kappa);
-        totalWeight += w;
+        ScalarType probeEstimate = probe->evaluate(p, kappa);
 
         // Add cached source if pointIdx matches
         if (pointIdx >= 0) {
             for (size_t idx = 0; idx < probe->targetIndices.size(); ++idx) {
                 if (probe->targetIndices[idx] == pointIdx) {
-                    result += probe->srcAccum[idx];
+                    probeEstimate += probe->srcAccum[idx];
                     break;
                 }
             }
         }
+
+        result += w * probeEstimate;
+        totalWeight += w;
     }
 
     return totalWeight > 0.0 ? result / totalWeight : ScalarType::NaN();

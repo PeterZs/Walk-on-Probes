@@ -4,6 +4,7 @@
 #include "core/scalar.hpp"
 #include "core/vector.hpp"
 
+#include <cassert>
 #include <vector>
 
 WOS_NAMESPACE_OPEN_SCOPE
@@ -13,16 +14,18 @@ static constexpr int MaxWalkSteps = 2048;
 template<typename ScalarType, int DIM>
 struct WalkPath
 {
+    // For M steps, every per-step array below has exactly M entries.
+    // positions[j] is the state before step j.
     std::vector<Vector<DIM>> positions;
     std::vector<ScalarType> sourceContribs;
     std::vector<ScalarType> neumannContribs;
     std::vector<double> transitionWeights;
-    std::vector<double> pdfs;                 // sampling PDF for each step's angle
-    std::vector<int> probeIndices;            // -1 = fallback WoSt step
-    ScalarType dirichlet = ScalarType::NaN(); // NaN if not hit Dirichlet boundary
+    std::vector<double> pdfs;      // PDF used to sample the endpoint of step j
+    std::vector<int> probeIndices; // probe used by step j; -1 for a fallback WoSt step
+
+    // Terminal state after the last recorded step.
+    ScalarType dirichlet = ScalarType::NaN();
     Vector<DIM> dirichletPos;
-    int dirichletProbeIdx = -1;
-    int count = 0; // number of recorded steps
 
     WalkPath()
     {
@@ -43,46 +46,68 @@ struct WalkPath
         pdfs.clear();
         probeIndices.clear();
         dirichlet = ScalarType::NaN();
-        dirichletProbeIdx = -1;
-        count = 0;
     }
 
     void recordStep(const Vector<DIM>& pos,
                     double pdf,
                     double transitionWeight,
-                    ScalarType S,
-                    ScalarType N,
+                    ScalarType source,
+                    ScalarType neumann,
                     int probeIdx)
     {
         positions.push_back(pos);
-        pdfs.push_back(pdf);
+        sourceContribs.push_back(source);
+        neumannContribs.push_back(neumann);
         transitionWeights.push_back(transitionWeight);
-        sourceContribs.push_back(S);
-        neumannContribs.push_back(N);
+        pdfs.push_back(pdf);
         probeIndices.push_back(probeIdx);
-        ++count;
     }
 
-    // O(M) reverse pass: estimates[0..count-1] for positions[0..count-1],
-    // estimates[count] for dirichletPos (= D)
-    void computeEstimates(std::vector<ScalarType>& estimates, int& estCount) const
+    int stepCount() const { return static_cast<int>(positions.size()); }
+
+    // Endpoint sampled by step j. For a probe step, this is the position/value
+    // pair that must be accumulated as its boundary sample.
+    const Vector<DIM>& stepEndPosition(int j) const
     {
-        estimates.resize(count + 1);
+        assert(j >= 0 && j < stepCount());
+        return j + 1 < stepCount() ? positions[j + 1] : dirichletPos;
+    }
+
+    // Produces U[0..M], where U[j] belongs to positions[j] and U[M]
+    // belongs to dirichletPos. The backward recurrence is:
+    // U[j] = transitionWeights[j] * U[j + 1]
+    //      + sourceContribs[j] + neumannContribs[j].
+    void computeEstimates(std::vector<ScalarType>& estimates) const
+    {
+        assertConsistent();
+        const int n = stepCount();
+        estimates.resize(n + 1);
+
         ScalarType accum = dirichlet;
-        estimates[count] = accum;
-        for (int j = count - 1; j >= 0; --j) {
+        estimates[n] = accum;
+        for (int j = n - 1; j >= 0; --j) {
             accum = transitionWeights[j] * accum + sourceContribs[j] + neumannContribs[j];
             estimates[j] = accum;
         }
-        estCount = count + 1;
     }
 
     ScalarType startingEstimate() const
     {
-        ScalarType r = dirichlet;
-        for (int j = count - 1; j >= 0; --j)
-            r = transitionWeights[j] * r + sourceContribs[j] + neumannContribs[j];
-        return r;
+        assertConsistent();
+        ScalarType result = dirichlet;
+        for (int j = stepCount() - 1; j >= 0; --j)
+            result = transitionWeights[j] * result + sourceContribs[j] + neumannContribs[j];
+        return result;
+    }
+
+  private:
+    void assertConsistent() const
+    {
+        assert(sourceContribs.size() == positions.size());
+        assert(neumannContribs.size() == positions.size());
+        assert(transitionWeights.size() == positions.size());
+        assert(pdfs.size() == positions.size());
+        assert(probeIndices.size() == positions.size());
     }
 };
 

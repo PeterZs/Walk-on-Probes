@@ -97,6 +97,7 @@ WoPCachingSolver<ScalarType, DIM>::runIteration(int iter)
         {
             auto& random = this->randomState();
             WalkPath<ScalarType, DIM> localPath;
+            std::vector<ScalarType> estimates;
             fcpw::Interaction<static_cast<size_t>(DIM)> interaction;
 
 #pragma omp for schedule(dynamic)
@@ -119,38 +120,23 @@ WoPCachingSolver<ScalarType, DIM>::runIteration(int iter)
                 }
 
                 // Reverse accumulation onto probes
-                const auto& pathPositions = localPath.positions;
-                const auto& pathSourceContribs = localPath.sourceContribs;
-                const auto& pathNeumannContribs = localPath.neumannContribs;
                 const auto& pathPdfs = localPath.pdfs;
                 const auto& pathProbeIndices = localPath.probeIndices;
-                const int pathCount = localPath.count;
+                const int pathCount = localPath.stepCount();
+                localPath.computeEstimates(estimates);
 
-                ScalarType estimate = localPath.dirichlet;
-                Vector<DIM> pos = localPath.dirichletPos;
-                double pdf;
-                int probeIdx;
-                if (pathCount > 0) {
-                    for (int j = pathCount - 1; j >= 0; --j) {
-                        if (j != pathCount - 1) {
-                            estimate += pathSourceContribs[j + 1] + pathNeumannContribs[j + 1];
-                            pos = pathPositions[j + 1];
-                        }
-                        pdf = pathPdfs[j];
-                        probeIdx = pathProbeIndices[j];
-                        if (probeIdx >= 0) {
-                            auto& probe = probesVec[probeIdx];
-                            probe.addSample(pos, estimate, pdf);
-                        }
-                    }
-                    // Add contribution to probe of starting point
-                    estimate += pathSourceContribs[0] + pathNeumannContribs[0];
-                    pos = pathPositions[0];
+                for (int j = pathCount - 1; j >= 0; --j) {
+                    int probeIdx = pathProbeIndices[j];
+                    if (probeIdx < 0)
+                        continue;
+                    probesVec[probeIdx].addSample(localPath.stepEndPosition(j), estimates[j + 1], pathPdfs[j]);
                 }
-                pdf = (DIM == 2) ? 0.5 * INV_PI : 0.25 * INV_PI;
-                probeIdx = boundaryPointToProbeIdx_[k];
-                auto& probe = probesVec[probeIdx];
-                probe.addSample(pos, estimate, pdf);
+
+                // Add the complete estimate at the starting boundary point.
+                const double startPdf = (DIM == 2) ? 0.5 * INV_PI : 0.25 * INV_PI;
+                const int startProbeIdx = boundaryPointToProbeIdx_[k];
+                probesVec[startProbeIdx].addSample(allBoundaryPoints_[k], estimates[0], startPdf);
+
             }
         }
     }
@@ -275,7 +261,7 @@ WoPCachingSolver<ScalarType, DIM>::buildCache()
         auto prepareTimer = this->timePrepare();
 
     // 1. Build probe set
-    probes_.build(scene, targetPoints_, this->seed_, epsilon_, alphaRec_, alphaRec_, wMin_);
+    probes_.build(scene, targetPoints_, this->seed_, epsilon_, alphaRec_, alphaWalk_, wMin_);
 
     if (probes_.empty()) {
         spdlog::warn("WoPCachingSolver::buildCache: no probes placed, skipping");
