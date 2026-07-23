@@ -8,6 +8,7 @@
     "analytical": false,
     "solver": {
         "type": "wop",
+        "enable_source": false,
         "wpp": 4,
         "max_steps": 1024,
         "epsilon": 0.0001,

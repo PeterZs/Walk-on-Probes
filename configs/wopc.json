@@ -8,6 +8,7 @@
     "analytical": false,
     "solver": {
         "type": "wopc",
+        "enable_source": false,
         "num_iterations": 4,
         "fourier_modes": 10,
         "lambda": 100.0,

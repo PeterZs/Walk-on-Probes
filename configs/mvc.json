@@ -8,6 +8,7 @@
     "analytical": false,
     "solver": {
         "type": "mvc",
+        "enable_source": false,
         "num_iterations": 4,
         "num_cache_points": 40000,
         "wost_wpp": 1,
