@@ -42,6 +42,7 @@ template<typename ScalarType, int DIM>
 ScalarType
 WoPSolver<ScalarType, DIM>::solve(const Vector<DIM>& targetPoint)
 {
+    auto& random = this->randomState();
     WalkPath<ScalarType, DIM> path;
     std::vector<Vector<DIM>> pts = { targetPoint };
     ensureProbes(pts);
@@ -57,8 +58,8 @@ WoPSolver<ScalarType, DIM>::solve(const Vector<DIM>& targetPoint)
                 maxSteps_,
                 epsilon_,
                 rMin_,
-                this->rng_,
-                this->dist01_,
+                random.rng,
+                random.uniform,
                 interaction);
         auto walkResult = path.startingEstimate();
         if (walkResult.isNaN()) {
@@ -91,8 +92,7 @@ WoPSolver<ScalarType, DIM>::solve(const std::vector<Vector<DIM>>& points, std::v
 #pragma omp parallel
     {
         int tid = omp_get_thread_num();
-        auto threadRng = Solver<ScalarType, DIM>::makeRngFromSeed(this->seed_, 1 + tid);
-        std::uniform_real_distribution<double> threadDist01(0.0, 1.0);
+        auto& random = this->randomState();
         WalkPath<ScalarType, DIM> path;
 
 #pragma omp for schedule(dynamic)
@@ -108,8 +108,8 @@ WoPSolver<ScalarType, DIM>::solve(const std::vector<Vector<DIM>>& points, std::v
                         maxSteps_,
                         epsilon_,
                         rMin_,
-                        threadRng,
-                        threadDist01,
+                        random.rng,
+                        random.uniform,
                         interaction);
                 auto walkResult = path.startingEstimate();
                 if (walkResult.isNaN()) {

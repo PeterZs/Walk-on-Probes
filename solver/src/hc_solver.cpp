@@ -76,7 +76,7 @@ HCSolver<ScalarType, DIM>::runIteration(int iter)
         // Use a fresh seed for every iteration. WoSt batch solves initialize
         // their thread streams from the solver seed, so reusing one solver
         // would otherwise repeat the same random streams each iteration.
-        woStSolver_ = std::make_unique<WoStSolver<ScalarType, DIM>>(scene, this->seed_ + 1 + iter);
+        woStSolver_ = std::make_unique<WoStSolver<ScalarType, DIM>>(scene, this->rngPool());
         woStSolver_->setMaxSteps(maxSteps_);
         woStSolver_->setEpsilon(epsilon_);
         woStSolver_->setRMin(rMin_);
@@ -103,9 +103,7 @@ HCSolver<ScalarType, DIM>::runIteration(int iter)
     spdlog::info("HCSolver: sampling sources for {} probes...", numProbes);
 #pragma omp parallel
     {
-        int tid = omp_get_thread_num();
-        auto threadRng = Solver<ScalarType, DIM>::makeRngFromSeed(this->seed_, 300000 + 7919 * iter + tid);
-        std::uniform_real_distribution<double> threadDist01(0.0, 1.0);
+        auto& random = this->randomState();
 
 #pragma omp for schedule(dynamic)
         for (int p = 0; p < numProbes; ++p) {
@@ -120,7 +118,7 @@ HCSolver<ScalarType, DIM>::runIteration(int iter)
             int M = std::max(static_cast<int>(mu_ * std::pow(R, DIM)), minSourceSamples_);
 
             for (int j = 0; j < M; ++j) {
-                auto ySample = sampleUniformBall<DIM>(threadRng, threadDist01, R);
+                auto ySample = sampleUniformBall<DIM>(random.rng, random.uniform, R);
                 Vector<DIM> Yj = probe.center + ySample.point;
                 ScalarType fVal = scene.source(Yj);
 
@@ -150,7 +148,8 @@ HCSolver<ScalarType, DIM>::sampleBoundarySamples(const Probe<ScalarType, DIM>& p
 
     if constexpr (DIM == 2) {
         for (int i = 0; i < N; ++i) {
-            double u = this->dist01_(this->rng_);
+            auto& random = this->randomState();
+            double u = random.uniform(random.rng);
             double theta = 2.0 * PI * (static_cast<double>(i) + u) / static_cast<double>(N);
 
             // Boundary sample position (absolute)
@@ -171,13 +170,14 @@ HCSolver<ScalarType, DIM>::sampleBoundarySamples(const Probe<ScalarType, DIM>& p
         int sampleIdx = 0;
 
         for (int ti = 0; ti < nTheta && sampleIdx < N; ++ti) {
-            double uT = this->dist01_(this->rng_);
+            auto& random = this->randomState();
+            double uT = random.uniform(random.rng);
             double cosColat = 1.0 - 2.0 * (static_cast<double>(ti) + uT) / static_cast<double>(nTheta);
             cosColat = std::clamp(cosColat, -1.0, 1.0);
             double sinColat = std::sqrt(std::max(0.0, 1.0 - cosColat * cosColat));
 
             for (int pi = 0; pi < nPhi && sampleIdx < N; ++pi) {
-                double uP = this->dist01_(this->rng_);
+                double uP = random.uniform(random.rng);
                 double phi = 2.0 * PI * (static_cast<double>(pi) + uP) / static_cast<double>(nPhi);
 
                 // Boundary sample position
@@ -303,8 +303,9 @@ template<typename ScalarType, int DIM>
 ScalarType
 HCSolver<ScalarType, DIM>::solve(const Vector<DIM>& targetPoint)
 {
+    auto& random = this->randomState();
     fcpw::Interaction<static_cast<size_t>(DIM)> interaction;
-    return solvePoint(targetPoint, -1, this->rng_, this->dist01_, interaction);
+    return solvePoint(targetPoint, -1, random.rng, random.uniform, interaction);
 }
 
 // ==== solve (batch) ====
@@ -323,14 +324,12 @@ HCSolver<ScalarType, DIM>::solve(const std::vector<Vector<DIM>>& points, std::ve
 
 #pragma omp parallel
     {
-        int tid = omp_get_thread_num();
-        auto threadRng = Solver<ScalarType, DIM>::makeRngFromSeed(this->seed_, 1 + tid);
-        std::uniform_real_distribution<double> threadDist(0.0, 1.0);
+        auto& random = this->randomState();
         fcpw::Interaction<static_cast<size_t>(DIM)> interaction;
 
 #pragma omp for schedule(dynamic)
         for (int i = 0; i < static_cast<int>(points.size()); ++i) {
-            results[i] = solvePoint(points[i], i, threadRng, threadDist, interaction);
+            results[i] = solvePoint(points[i], i, random.rng, random.uniform, interaction);
         }
     }
 }

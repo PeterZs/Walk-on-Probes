@@ -114,21 +114,22 @@ main(int argc, char* argv[])
             scene = std::make_unique<WOS::ObjScene<WOS::Scalar<3>, DIM>>(scenePath);
 
         // ---- create solver ----
+        WOS::ThreadRngPool rngPool(seed);
         std::unique_ptr<WOS::Solver<WOS::Scalar<3>, DIM>> solver;
         if (solverName == "wos") {
-            solver = std::make_unique<WOS::WoSSolver<WOS::Scalar<3>, DIM>>(*scene, seed);
+            solver = std::make_unique<WOS::WoSSolver<WOS::Scalar<3>, DIM>>(*scene, rngPool);
         } else if (solverName == "wost") {
-            solver = std::make_unique<WOS::WoStSolver<WOS::Scalar<3>, DIM>>(*scene, seed);
+            solver = std::make_unique<WOS::WoStSolver<WOS::Scalar<3>, DIM>>(*scene, rngPool);
         } else if (solverName == "wop") {
-            solver = std::make_unique<WOS::WoPSolver<WOS::Scalar<3>, DIM>>(*scene, seed);
+            solver = std::make_unique<WOS::WoPSolver<WOS::Scalar<3>, DIM>>(*scene, rngPool);
         } else if (solverName == "hc") {
-            solver = std::make_unique<WOS::HCSolver<WOS::Scalar<3>, DIM>>(*scene, seed);
+            solver = std::make_unique<WOS::HCSolver<WOS::Scalar<3>, DIM>>(*scene, rngPool);
         } else if (solverName == "wopc") {
-            solver = std::make_unique<WOS::WoPCachingSolver<WOS::Scalar<3>, DIM>>(*scene, seed);
+            solver = std::make_unique<WOS::WoPCachingSolver<WOS::Scalar<3>, DIM>>(*scene, rngPool);
         } else if (solverName == "mvc") {
-            solver = std::make_unique<WOS::MVCSolver<WOS::Scalar<3>, DIM>>(*scene, seed);
+            solver = std::make_unique<WOS::MVCSolver<WOS::Scalar<3>, DIM>>(*scene, rngPool);
         } else {
-            solver = std::make_unique<WOS::WoSSolver<WOS::Scalar<3>, DIM>>(*scene, seed);
+            solver = std::make_unique<WOS::WoSSolver<WOS::Scalar<3>, DIM>>(*scene, rngPool);
         }
 
         // Apply solver configuration from JSON or CLI

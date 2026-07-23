@@ -70,7 +70,8 @@ main(int argc, char* argv[])
                  seed,
                  maxSteps);
 
-    WOS::WoStSolver<Scalar3d, 2> solver(scene, seed);
+    WOS::ThreadRngPool rngPool(seed);
+    WOS::WoStSolver<Scalar3d, 2> solver(scene, rngPool);
     solver.setMaxSteps(maxSteps);
     solver.setWalksPerPixel(1);
 

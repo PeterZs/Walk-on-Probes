@@ -192,6 +192,7 @@ void
 MVCSolver<ScalarType, DIM>::generateCachePoints(std::vector<CachePoint>& out)
 {
     const auto& scene = this->scene();
+    auto& random = this->randomState();
 
     Vector<DIM> renderMin = scene.getRenderMin();
     Vector<DIM> renderMax = scene.getRenderMax();
@@ -205,7 +206,7 @@ MVCSolver<ScalarType, DIM>::generateCachePoints(std::vector<CachePoint>& out)
         // Sample uniformly in ROI bounding box
         Vector<DIM> p;
         for (int d = 0; d < DIM; ++d)
-            p[d] = renderMin[d] + this->dist01_(this->rng_) * (renderMax[d] - renderMin[d]);
+            p[d] = renderMin[d] + random.uniform(random.rng) * (renderMax[d] - renderMin[d]);
 
         // Check ROI membership
         if (!scene.isInsideROI(p))
@@ -235,7 +236,7 @@ MVCSolver<ScalarType, DIM>::generateCachePoints(std::vector<CachePoint>& out)
                 acceptProb = std::max(factor / adaptQ_, lambda_ / adaptQ_);
             }
 
-            if (this->dist01_(this->rng_) > acceptProb) {
+            if (random.uniform(random.rng) > acceptProb) {
                 continue;
             }
 
@@ -269,7 +270,7 @@ MVCSolver<ScalarType, DIM>::buildCache()
     accumulatedCounts_.assign(targetPoints_.size(), 0);
 
     // Create delegate WoSt solver (reused across rounds)
-    woStSolver_ = std::make_unique<WoStSolver<ScalarType, DIM>>(scene, this->seed_ + 1);
+    woStSolver_ = std::make_unique<WoStSolver<ScalarType, DIM>>(scene, this->rngPool());
     woStSolver_->setMaxSteps(maxSteps_);
     woStSolver_->setEpsilon(epsilon_);
         woStSolver_->setRMin(rMin_);
@@ -312,9 +313,7 @@ MVCSolver<ScalarType, DIM>::buildCache()
         // e. Query each target point in parallel
 #pragma omp parallel
         {
-            int tid = omp_get_thread_num();
-            auto threadRng = Solver<ScalarType, DIM>::makeRngFromSeed(this->seed_, 2 + round + tid);
-            std::uniform_real_distribution<double> threadDist(0.0, 1.0);
+            auto& random = this->randomState();
             fcpw::Interaction<static_cast<size_t>(DIM)> interaction;
 
 #pragma omp for schedule(dynamic)
@@ -327,8 +326,8 @@ MVCSolver<ScalarType, DIM>::buildCache()
                                                                    rMin_,
                                                                    minSourceSamples_,
                                                                    sourceRatio_,
-                                                                   threadRng,
-                                                                   threadDist,
+                                                                   random.rng,
+                                                                   random.uniform,
                                                                    interaction,
                                                                    cachePositions,
                                                                    cacheSolutions,

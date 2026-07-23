@@ -27,11 +27,12 @@ template<typename ScalarType, int DIM>
 ScalarType
 WoSSolver<ScalarType, DIM>::solve(const Vector<DIM>& targetPoint)
 {
+    auto& random = this->randomState();
     ScalarType result(0.0);
     fcpw::Interaction<DIM> interaction;
     for (int w = 0; w < wpp_; ++w) {
         auto walkResult =
-          walkWoS(*this->scene_, targetPoint, maxSteps_, epsilon_, this->rng_, this->dist01_, interaction);
+          walkWoS(*this->scene_, targetPoint, maxSteps_, epsilon_, random.rng, random.uniform, interaction);
         if (walkResult.isNaN()) {
             --w;
             continue;
@@ -57,8 +58,7 @@ WoSSolver<ScalarType, DIM>::solve(const std::vector<Vector<DIM>>& points, std::v
 #pragma omp parallel
     {
         int tid = omp_get_thread_num();
-        auto threadRng = Solver<ScalarType, DIM>::makeRngFromSeed(this->seed_, 1 + tid);
-        std::uniform_real_distribution<double> threadDist01(0.0, 1.0);
+        auto& random = this->randomState();
 
 #pragma omp for schedule(dynamic)
         for (int i = 0; i < numPoints; ++i) {
@@ -66,7 +66,7 @@ WoSSolver<ScalarType, DIM>::solve(const std::vector<Vector<DIM>>& points, std::v
             fcpw::Interaction<DIM> interaction;
             for (int w = 0; w < wpp_; ++w) {
                 auto walkResult =
-                  walkWoS(*this->scene_, points[i], maxSteps_, epsilon_, threadRng, threadDist01, interaction);
+                  walkWoS(*this->scene_, points[i], maxSteps_, epsilon_, random.rng, random.uniform, interaction);
                 if (walkResult.isNaN()) {
                     --w;
                     continue;

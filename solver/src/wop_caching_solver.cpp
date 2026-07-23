@@ -93,9 +93,7 @@ WoPCachingSolver<ScalarType, DIM>::runIteration(int iter)
                      iter);
 #pragma omp parallel
         {
-            int tid = omp_get_thread_num();
-            auto threadRng = Solver<ScalarType, DIM>::makeRngFromSeed(this->seed_, 100000 + 7919 * iter + tid);
-            std::uniform_real_distribution<double> threadDist01(0.0, 1.0);
+            auto& random = this->randomState();
             WalkPath<ScalarType, DIM> localPath;
             fcpw::Interaction<static_cast<size_t>(DIM)> interaction;
 
@@ -109,8 +107,8 @@ WoPCachingSolver<ScalarType, DIM>::runIteration(int iter)
                         maxSteps_,
                         epsilon_,
                         rMin_,
-                        threadRng,
-                        threadDist01,
+                        random.rng,
+                        random.uniform,
                         interaction);
                 if (localPath.dirichlet.isNaN()) {
                     continue;
@@ -138,7 +136,7 @@ WoPCachingSolver<ScalarType, DIM>::runIteration(int iter)
                         probeIdx = pathProbeIndices[j];
                         if (probeIdx >= 0) {
                             auto& probe = probesVec[probeIdx];
-                            probe.addSampleUnlocked(pos, estimate, pdf);
+                            probe.addSample(pos, estimate, pdf);
                         }
                     }
                     // Add contribution to probe of starting point
@@ -148,7 +146,7 @@ WoPCachingSolver<ScalarType, DIM>::runIteration(int iter)
                 pdf = (DIM == 2) ? 0.5 * INV_PI : 0.25 * INV_PI;
                 probeIdx = boundaryPointToProbeIdx_[k];
                 auto& probe = probesVec[probeIdx];
-                probe.addSampleUnlocked(pos, estimate, pdf);
+                probe.addSample(pos, estimate, pdf);
             }
         }
     }
@@ -157,9 +155,7 @@ WoPCachingSolver<ScalarType, DIM>::runIteration(int iter)
     spdlog::info("WoPCachingSolver: sampling sources for {} probes (iteration {})...", numProbes, iter);
 #pragma omp parallel
     {
-        int tid = omp_get_thread_num();
-        auto threadRng = Solver<ScalarType, DIM>::makeRngFromSeed(this->seed_, 200000 + 7919 * iter + tid);
-        std::uniform_real_distribution<double> threadDist01(0.0, 1.0);
+        auto& random = this->randomState();
 
 #pragma omp for schedule(dynamic)
         for (int p = 0; p < numProbes; ++p) {
@@ -174,7 +170,7 @@ WoPCachingSolver<ScalarType, DIM>::runIteration(int iter)
             int M = std::max(static_cast<int>(mu_ * std::pow(R, DIM)), minSourceSamples_);
 
             for (int j = 0; j < M; ++j) {
-                auto ySample = sampleUniformBall<DIM>(threadRng, threadDist01, R);
+                auto ySample = sampleUniformBall<DIM>(random.rng, random.uniform, R);
                 Vector<DIM> Yj = probe.center + ySample.point;
                 ScalarType fVal = scene.source(Yj);
 
@@ -204,7 +200,8 @@ WoPCachingSolver<ScalarType, DIM>::sampleBoundarySamples(const Probe<ScalarType,
 
     if constexpr (DIM == 2) {
         for (int i = 0; i < N; ++i) {
-            double u = this->dist01_(this->rng_);
+            auto& random = this->randomState();
+            double u = random.uniform(random.rng);
             double theta = 2.0 * PI * (static_cast<double>(i) + u) / static_cast<double>(N);
 
             // Boundary sample position (absolute)
@@ -225,13 +222,14 @@ WoPCachingSolver<ScalarType, DIM>::sampleBoundarySamples(const Probe<ScalarType,
         int sampleIdx = 0;
 
         for (int ti = 0; ti < nTheta && sampleIdx < N; ++ti) {
-            double uT = this->dist01_(this->rng_);
+            auto& random = this->randomState();
+            double uT = random.uniform(random.rng);
             double cosColat = 1.0 - 2.0 * (static_cast<double>(ti) + uT) / static_cast<double>(nTheta);
             cosColat = std::clamp(cosColat, -1.0, 1.0);
             double sinColat = std::sqrt(std::max(0.0, 1.0 - cosColat * cosColat));
 
             for (int pi = 0; pi < nPhi && sampleIdx < N; ++pi) {
-                double uP = this->dist01_(this->rng_);
+                double uP = random.uniform(random.rng);
                 double phi = 2.0 * PI * (static_cast<double>(pi) + uP) / static_cast<double>(nPhi);
 
                 // Boundary sample position
@@ -346,8 +344,9 @@ template<typename ScalarType, int DIM>
 ScalarType
 WoPCachingSolver<ScalarType, DIM>::solve(const Vector<DIM>& targetPoint)
 {
+    auto& random = this->randomState();
     fcpw::Interaction<static_cast<size_t>(DIM)> interaction;
-    return solvePoint(targetPoint, -1, this->rng_, this->dist01_, interaction);
+    return solvePoint(targetPoint, -1, random.rng, random.uniform, interaction);
 }
 
 // ==== solve (batch) ====
@@ -366,14 +365,12 @@ WoPCachingSolver<ScalarType, DIM>::solve(const std::vector<Vector<DIM>>& points,
 
 #pragma omp parallel
     {
-        int tid = omp_get_thread_num();
-        auto threadRng = Solver<ScalarType, DIM>::makeRngFromSeed(this->seed_, 1 + tid);
-        std::uniform_real_distribution<double> threadDist(0.0, 1.0);
+        auto& random = this->randomState();
         fcpw::Interaction<static_cast<size_t>(DIM)> interaction;
 
 #pragma omp for schedule(dynamic)
         for (int i = 0; i < static_cast<int>(points.size()); ++i) {
-            results[i] = solvePoint(points[i], i, threadRng, threadDist, interaction);
+            results[i] = solvePoint(points[i], i, random.rng, random.uniform, interaction);
         }
     }
 }
