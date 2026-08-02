@@ -3,6 +3,8 @@
 This repository contains the official implementation of our **SIGGRAPH 2026** paper
 "[Probe-based Walk on Spheres for Efficient Path Reusing](https://t7imal.github.io/projects/2026wop/)".
 
+![Teaser](teaser.jpg)
+
 ## Build
 
 Our code was developed and tested on Windows 11 with Clang 20.1.0.
